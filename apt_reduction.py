@@ -9,11 +9,9 @@ from apt_toolkit.utils import vector_utils as vu
 # model settings
 ideal_epochs = 100
 dim = 10
-max_vocab = 10000000
 
 vectors = 'path/to/vectors'
-
-# vectors = vu.load_vector_cache(vector_in_file=vectors)
+vectors = vu.load_vector_cache(vector_in_file=vectors)
 
 print('setting up GloVe models...')
 amod_model = Model(model_name='amod')
@@ -24,11 +22,9 @@ dobj_model = Model(model_name='dobj')
 dobj_model.path_and_fit(vectors, prepare_batches=True, save_training_set=False)
 dobj_model.asimmetric_glove(dim)
 
-
 nsubj_model = Model(model_name='nsubj')
 nsubj_model.path_and_fit(vectors, prepare_batches=True, save_training_set=False)
 nsubj_model.asimmetric_glove(dim)
-
 
 models = [amod_model, dobj_model, nsubj_model]
 
