@@ -1,6 +1,12 @@
 
 import os
 
+def np_tensor(x, y):
+
+    import numpy as np
+
+    return np.random.uniform(low=-1, high=1, size=(x, y))
+
 def write_context_embeddings(models):
 
     print('Writing down context embeddings...')
