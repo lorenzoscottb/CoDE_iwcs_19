@@ -31,14 +31,14 @@ def write_focal_embeddings(models):
             # break
         file.close()
      
-def shared_training(models, epochs)
+def shared_training(models, emdeddings_dimensions, epochs)
     
     ideal_epochs = epochs
     epochs = (int(ideal_epochs/len(paths)))*len(paths)
     sub_epochs = len(models)
 
     print('\n')
-    shared_emb = utils.np_tensor(amod_model.dict_size, dim)
+    shared_emb = utils.np_tensor(amod_model.dict_size, emdeddings_dimensions)
 
     for epoch in range(epochs):
 
