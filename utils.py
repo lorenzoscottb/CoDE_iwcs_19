@@ -30,3 +30,33 @@ def write_focal_embeddings(models):
             file.write('en_' + word + ' ' + str(list(embeddings[index])).replace(',', '').strip('[').strip(']') + '\n')
             # break
         file.close()
+     
+def shared_training(models, epochs)
+    
+    ideal_epochs = epochs
+    epochs = (int(ideal_epochs/len(paths)))*len(paths)
+    sub_epochs = len(models)
+
+    print('\n')
+    shared_emb = utils.np_tensor(amod_model.dict_size, dim)
+
+    for epoch in range(epochs):
+
+        print('Global epoch ', epoch+1)
+#         if epoch == epochs:
+#             last_train_status = True
+
+        for sub_epoch in range(sub_epochs):
+
+            print('training %s model' % paths[sub_epoch])
+            # print(sub_epoch+1)
+
+            model = models[sub_epoch]
+            model.set_weight(shared_emb)
+            i_s, j_s, counts = models[sub_epoch].training_set()
+            model.train([np.array(i_s), np.array(j_s)],
+                        np.array(counts),
+                        sub_epochs,
+                        512)
+            shared_emb = np.array(model.get_weights()[0].reshape(model.dict_size, dim))
+        
