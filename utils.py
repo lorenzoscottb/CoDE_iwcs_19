@@ -10,7 +10,7 @@ def np_tensor(x, y):
 def write_context_embeddings(models):
 
     print('Writing down context embeddings...')
-    context_vocabulary = models[-1]._Model__context_words # last to train
+    context_vocabulary = models[-1].context_words # last to train
     context_embeddings = np.array((models[-1]).get_weights()[0])
     file = open(os.getcwd()+'/context_embeddigns.txt', 'w')
     for index, word in enumerate(context_vocabulary):
