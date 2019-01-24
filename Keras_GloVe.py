@@ -164,7 +164,13 @@ class Model():
         if self.__words is None:
             raise NotFitToCorpusError("Need to fit model to corpus before accessing words.")
         return self.__words
-
+    
+    @property
+    def context_words(self):
+        if self.__context_words is None:
+            raise NotFitToCorpusError("Need to fit model to corpus before accessing context words.")
+        return self.__context_words
+    
     @property
     def embeddings(self):
         if self.__embeddings is None:
