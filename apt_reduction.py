@@ -1,5 +1,5 @@
 
-from Keras_GloVe import Model
+from Glove_Reduction import Model
 import numpy as np
 import os
 import utils
@@ -32,4 +32,9 @@ utils.shared_training(ideal_epochs, dim, 100)
 
 utils.write_context_embeddings(models)
 utils.write_focal_embeddings(models)
+
+distance = []
+for model in models:
+    distance.append(model.model_evaluation(context_embeddings=shared_emb))
+
 
