@@ -84,8 +84,6 @@ def run_ml_10(test_phrase='adjectivenouns', composition='concatenation'):
             ml_values.append(int(e[-1]))
             cs_values.append(cosine_similarity(an_1, an_2))
             print('%s:collected' % e[3:7])
-        # # if index == 8:
-        # #     break
         except:
             print('%s:something thing whent wrong' % e[3:7])
 
