@@ -74,7 +74,6 @@ def run_ml_10(test_phrase='adjectivenouns', composition='concatenation'):
         e = element[0].split()
         if e[1] != test_phrase:
             continue
-        ml_values.append(int(e[-1]))
         try:
             if composition == 'concatenation':
                 an_1 = np.concatenate((adj_emb(e[3]), noun_emb(e[4])))
@@ -82,6 +81,7 @@ def run_ml_10(test_phrase='adjectivenouns', composition='concatenation'):
             else:
                 an_1 = adj_emb(e[3]) + noun_emb(e[4])
                 an_2 = adj_emb(e[5]) + noun_emb(e[6])
+            ml_values.append(int(e[-1]))
             cs_values.append(cosine_similarity(an_1, an_2))
             print('%s:collected' % e[3:7])
         # # if index == 8:
@@ -93,3 +93,4 @@ def run_ml_10(test_phrase='adjectivenouns', composition='concatenation'):
 
 
 run_ml_10(composition='sum')
+
