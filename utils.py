@@ -38,7 +38,7 @@ def shared_training(models, emdeddings_dimensions, epochs)
     sub_epochs = len(models)
 
     print('\n')
-    shared_emb = utils.np_tensor(amod_model.dict_size, emdeddings_dimensions)
+    shared_emb = np_tensor(amod_model.dict_size, emdeddings_dimensions)
 
     for epoch in range(epochs):
 
