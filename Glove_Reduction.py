@@ -1,5 +1,4 @@
 
-
 from __future__ import division
 from collections import Counter, defaultdict
 import os
@@ -7,6 +6,7 @@ from random import shuffle
 import tensorflow as tf
 import numpy as np
 from apt_toolkit.utils import vector_utils as vu
+from numba import jit
 
 
 class NotTrainedError(Exception):
@@ -45,7 +45,7 @@ class Model():
         self.__word_to_id = None
         self.__cooccurrence_matrix = None
 
-    def path_and_fit(self, vectors, prepare_batches=True, save_training_set=False):
+    def path_and_fit(self, vectors, prepare_batches=True, save_training_set=False, pretrain_dataset=''):
         if self.dict_size == 0:
             self.dict_size = len(vectors.keys())
         self.__context_words = vectors.keys()
@@ -57,6 +57,10 @@ class Model():
         self.__context_words_to_id = {word:number for number, word in
                                       enumerate(self.__context_words)}
         self.__dict_size = len(self.__context_words_to_id)
+        if pretrain_dataset:
+            print('loading pretrain dataset')
+            prepare_batches = False
+            self.load_data_set(pretrain_dataset)
         if prepare_batches:
             print('Preparing shared-batches...')
             self.__i_indices, self.__j_indices, self.__counts = self.__shared_context_batches()
@@ -66,20 +70,25 @@ class Model():
             i_j_count_matrix = [self.__i_indices, self.__j_indices, self.__counts]
             save_object(i_j_count_matrix, self.model_name+'_training_set')
 
-    def fit_to_apt(self, corpus, vectors, prepare_batches=True, save_training_set=False):
+    def fit_to_apt(self, corpus, vectors, prepare_batches=True, save_training_set=False, pretrain_dataset=None):
         self.__fit_to_apt(corpus, vectors, self.max_vocab_size, self.min_occurrences,
                              self.left_context, self.right_context)
         self.__context_words_to_id = {word:number for number, word in
                                       enumerate(self.__context_words)}
         self.__dict_size = len(self.__context_words_to_id)
+        if pretrain_dataset:
+            prepare_batches = False
+            self.load_data_set()
         if prepare_batches:
             print('Preparing shared-batches...')
             self.__i_indices, self.__j_indices, self.__counts = self.__shared_context_batches()
 
         if save_training_set:
             print('saving trainig set...')
+            vocabularies = [self.__words, self.__context_words]
             i_j_count_matrix = [self.__i_indices, self.__j_indices, self.__counts]
             save_object(i_j_count_matrix, self.model_name+'_training_set')
+            save_object(vocabularies, self.model_name+'_vocabularies')
 
     def __fit_to_apt(self, corpus, vectors, vocab_size, min_occurrences, left_size, right_size):
         cooccurrence_matrix = {}
@@ -160,6 +169,10 @@ class Model():
         return len(self.__words)
 
     @property
+    def ppmis(self):
+        return self.__counts
+
+    @property
     def words(self):
         if self.__words is None:
             raise NotFitToCorpusError("Need to fit model to corpus before accessing words.")
@@ -201,8 +214,8 @@ class Model():
         self.model = None
 
         self.vector_dim = dimension
-        self.focal_size = self.vocab_size
-        self.context_sixe = self.dict_size
+        self.focal_size = max(self.__i_indices)+1
+        self.context_sixe = max(self.__j_indices)+1
 
         """
         A Keras implementation of the GloVe architecture
@@ -274,15 +287,9 @@ class Model():
 
         return np.random.uniform(low=-1, high=1, size=(x, y))
 
-    def save_object(self, object, name, dir=os.getcwd()):
+    def model_evaluation(self, context_embeddings=None, metric='spermanr'):
 
-        import pickle
-
-        with open(dir + name + '.pkl', 'wb') as f:
-            pickle.dump(object, f, pickle.HIGHEST_PROTOCOL)
-
-    def model_evaluation(self, context_embeddings=None):
-
+        print('running %s model evaluation:' %self.model_name)
         # from sklearn.metrics.pairwise import euclidean_distances
 
         b_cntx = None
@@ -290,6 +297,7 @@ class Model():
         e_cntx = None
         e_cntr = None
 
+        print('extracting embeddigns and wheights...')
         for layer in self.model.layers:
             if layer.name == self.CENTRAL_BIASES:
                 b_cntr = layer.get_weights()[0]
@@ -306,33 +314,93 @@ class Model():
             else:
                 e_cntx = context_embeddings
 
-        original_matrix = np.zeros((e_cntr.shape[0], e_cntr.shape[0]))
-        new_matrix = np.zeros((e_cntr.shape[0], e_cntr.shape[0]))
+        if metric == 'frobenius':
+            original_matrix = np.zeros((e_cntr.shape[0], e_cntr.shape[0]))
+            new_matrix = np.zeros((e_cntr.shape[0], e_cntr.shape[0]))
 
-        i_s, j_s, ppmis = self.training_set()
+            i_s, j_s, ppmis = self.training_set()
 
-        differences = np.zeros((len(ppmis), 1))
-        for index, ppmi in enumerate(ppmis):
-            y = i_s[index]
-            x = j_s[index]
+            differences = np.zeros((len(ppmis), 1))
+            print('collecting new matrix...')
+            for index, ppmi in enumerate(ppmis):
+                y = i_s[index]
+                x = j_s[index]
 
-            # print(x,y,ppmi)
-            original_matrix[y][x] = ppmi
-            new_matrix[y][x] = self.glove_reverse(b_cntx[x],
-                                                  b_cntr[y],
-                                                  e_cntx[x],
-                                                  e_cntr[y])
+                # print(x,y,ppmi)
+                original_matrix[y][x] = ppmi
+                new_matrix[y][x] = glove_reverse(b_cntx[x],
+                                                      b_cntr[y],
+                                                      e_cntx[x],
+                                                      e_cntr[y])
+            print('computing Frobenius distance...')
+            return frobenius_distance(original_matrix, new_matrix)
 
-        return frobenius_distance(original_matrix, new_matrix)
+        if metric == 'Jensen-Shannon':
 
-    def load_data_set(self, name, dir=os.getcwd()):
+            i_s, j_s, ppmis = self.training_set()
+
+            new_ppmis = np.zeros(len(ppmis))
+            print('collecting new distribution...')
+            for index, ppmi in enumerate(ppmis):
+                new_ppmis[index] = glove_reverse(b_cntx[j_s[index]],
+                                                 b_cntr[i_s[index]],
+                                                 e_cntx[j_s[index]],
+                                                 e_cntr[i_s[index]])
+
+            print('computing Jensen-Shannon divergence...')
+            return jsd(ppmis, new_ppmis)
+
+        if metric == 'spermanr':
+
+            from scipy.stats.stats import spearmanr
+
+            i_s, j_s, ppmis = self.training_set()
+
+            new_ppmis = np.zeros(len(ppmis))
+            print('collecting new distribution...')
+            for index, ppmi in enumerate(ppmis):
+                new_ppmis[index] = glove_reverse(b_cntx[j_s[index]],
+                                                 b_cntr[i_s[index]],
+                                                 e_cntx[j_s[index]],
+                                                 e_cntr[i_s[index]])
+
+            print('computing SPerman correlation...')
+            return spearmanr(ppmis, new_ppmis), new_ppmis
+
+    def save_model(self, element_to_save=4):
+
+        """
+        part indicates how many of the possible elments to save
+        unsing the index as a referemnce
+        """
+
+        vocab = self.__word_to_id
+        context_vocab = self.__context_words_to_id
+
+        context_embeddings = self.get_weights()[0]
+        focal_embeddigns = self.get_weights(layer_name='central_embeddings')[0]
+
+        all = [vocab, context_vocab,context_embeddings, focal_embeddigns]
+        all_names = ['voca', 'context voca', 'context emb', 'focal emb']
+
+        for index, element in enumerate(all):
+            try:
+                if index ==element_to_save:
+                    break
+                save_object(element, all_names[index])
+            except:
+                print('impossible to save %s as is not present' % all_names[index])
+
+    def load_data_set(self,file_dir):
 
         import pickle
 
-        with open(dir + name + '.pkl', 'rb') as f:
+        with open(file_dir, 'rb') as f:
             a = pickle.load(f)
 
-        sself.__i_indices, self.__j_indices, self.__counts = a[0], a[1], a[2]
+        self.__i_indices = tuple(a[0])
+        self.__j_indices = tuple(a[1])
+        self.__counts = tuple(a[2])
 
 
 def _context_windows(region, left_size, right_size):
@@ -403,7 +471,7 @@ def save_object(object, name, dir=os.getcwd()):
 
     import pickle
 
-    with open(dir + name + '.pkl', 'wb') as f:
+    with open(dir + '/' + name + '.pkl', 'wb') as f:
         pickle.dump(object, f, pickle.HIGHEST_PROTOCOL)
 
 
@@ -421,10 +489,27 @@ def custom_loss(y_true, y_pred, X_MAX = 100, a = 3.0 / 4.0):
                  K.square(y_pred - K.log(y_true)), axis=-1)
 
 
-def glove_reverse(b_c, b_f, v_c, v_f):
-    return np.power(2, np.inner(v_c, v_f) + b_c + b_f)
+@jit()
+def weights_f(x, X_MAX = 100, a = 3.0 / 4.0):
+
+    if x < X_MAX:
+        return np.power((x/X_MAX), a)
+
+    else:
+        return 1.0
 
 
+@jit()
+def glove_reverse(b_c, b_f, v_c, v_f, weight=False):
+
+    x = np.power(2, np.inner(v_c, v_f) + b_c + b_f)
+    if weight:
+        x = weights_f(x)
+
+    return x
+
+
+@jit()
 def frobenius_distance(matrix_a, matrix_b):
 
     #  F(a,b) = sqr(trace((a-b)*(a-b)trnsp))
@@ -436,4 +521,19 @@ def frobenius_distance(matrix_a, matrix_b):
 
     return np.sqrt(trace.item())
 
+@jit()
+def jsd(p, q, base=np.e):
+    import scipy as sp
+
+    '''
+        from 
+        Implementation of pairwise `jsd` based on  
+        https://en.wikipedia.org/wiki/Jensen%E2%80%93Shannon_divergence
+    '''
+    ## convert to np.array
+    p, q = np.asarray(p), np.asarray(q)
+    ## normalize p, q to probabilities
+    p, q = p/p.sum(), q/q.sum()
+    m = 1./2*(p + q)
+    return sp.stats.entropy(p,m, base=base)/2. +  sp.stats.entropy(q, m, base=base)/2.
 
