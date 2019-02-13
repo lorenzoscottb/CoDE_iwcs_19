@@ -163,4 +163,32 @@ for epoch in range(epochs):
                   epochs=sub_epochs,
                   batch_size=512)
         shared_emb = np.array(get_weights(model)).reshape(dict_size, dim)
+new_ppmis = []
+ppmis = []
+model_tags = []
+model_name = ['a', 'b', 'c']
+for index, model in enumerate(models):
+
+    _, _, ppmi = zip(*training_sets[index])
+    model_tag = [model_name[index] for element in ppmi]
+
+    evaluation, new_ppmi = model_evaluation(model,
+                                            training_sets[index],
+                                            context_embeddings=shared_emb)
+
+    print('%s model correlation' % model_name[index], evaluation)
+    new_ppmis += list(new_ppmi)
+    ppmis += list(ppmi)
+    model_tags += list(model_tag)
+
+data_names = ['real_values', 'model_values', 'model']
+data = [ppmis, new_ppmis, model_tags]
+vr = pd.DataFrame()
+for index, columns in enumerate(data_names):
+    vr[columns] = data[index]
+
+sns.set(style="whitegrid")
+sns.scatterplot(x='real_values', y='model_values', hue='model', palette=['r', 'b', 'g'], data=vr)
+plt.savefig(os.getcwd()+'/as_glove_evaluation')
+
 
