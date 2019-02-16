@@ -1,38 +1,48 @@
 
-from Glove_Reduction import Model
+from Glove_Reduction import Glove_Model
 import numpy as np
 import os
 import utils
 from apt_toolkit.utils import vector_utils as vu
 
 
-# model settings
+vectors = 'path/to/vectors'
+vectors = vu.load_vector_cache(vector_in_file=vectors)
+
 paths = ['amod', 'dobj', 'nsubj']
-ideal_epochs = 33
+ideal_epochs = 3
 epochs = (int(ideal_epochs/len(paths)))*len(paths)
 sub_epochs = len(paths)
 dim = 10
 
-vectors = 'path/to/vectors'
-vectors = vu.load_vector_cache(vector_in_file=vectors)
+print('reduce sample? [yes/no]')
+i = str(input())
+if i == 'yes':
+    sample_state = True
+else:
+    sample_state = False
 
 print('setting up GloVe models...')
-amod_model = Model(model_name='amod')
-amod_model.path_and_fit(vectors, prepare_batches=True, save_training_set=False)
+amod_model = Glove_Model(model_name='amod', paths=paths)
+amod_model.fit_to_vectors(vectors, use_sample=sample_state)
 amod_model.asimmetric_glove(dim)
 
-dobj_model = Model(model_name='dobj')
-dobj_model.path_and_fit(vectors, prepare_batches=True, save_training_set=False)
+dobj_model = Glove_Model(model_name='dobj', paths=paths)
+dobj_model.set_context(amod_model)
+dobj_model.fit_to_vectors(vectors, use_sample=sample_state)
 dobj_model.asimmetric_glove(dim)
 
-nsubj_model = Model(model_name='nsubj')
-nsubj_model.path_and_fit(vectors, prepare_batches=True, save_training_set=False)
+nsubj_model = Glove_Model(model_name='nsubj', paths=paths)
+nsubj_model.set_context(amod_model)
+nsubj_model.fit_to_vectors(vectors, use_sample=sample_state)
 nsubj_model.asimmetric_glove(dim)
+
 
 models = [amod_model, dobj_model, nsubj_model]
 
 print('\n')
-shared_emb = np_tensor(amod_model.dict_size, dim)
+context_size = len(amod_model.context_vocabulary)
+shared_emb = utils.np_tensor(context_size, dim)
 
 for epoch in range(epochs):
 
@@ -52,11 +62,9 @@ for epoch in range(epochs):
                     np.array(counts),
                     sub_epochs,
                     512)
-        shared_emb = np.array(model.get_weights()[0].reshape(model.dict_size, dim))
-        
-utils.write_context_embeddings(models)
-utils.write_focal_embeddings(models)
+        shared_emb = np.array(model.get_weights()[0].reshape(context_size, dim))
 
+        
 new_ppmis = []
 ppmis = []
 model_tags = []
