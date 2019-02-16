@@ -10,7 +10,7 @@ vectors = 'path/to/vectors'
 vectors = vu.load_vector_cache(vector_in_file=vectors)
 
 paths = ['amod', 'dobj', 'nsubj']
-ideal_epochs = 3
+ideal_epochs = 100
 epochs = (int(ideal_epochs/len(paths)))*len(paths)
 sub_epochs = len(paths)
 dim = 10
@@ -24,17 +24,17 @@ else:
 
 print('setting up GloVe models...')
 amod_model = Glove_Model(model_name='amod', paths=paths)
-amod_model.fit_to_vectors(vectors, use_sample=sample_state)
+amod_model.fit_to_vectors(sample_vectors, use_sample=sample_state)
 amod_model.asimmetric_glove(dim)
 
 dobj_model = Glove_Model(model_name='dobj', paths=paths)
 dobj_model.set_context(amod_model)
-dobj_model.fit_to_vectors(vectors, use_sample=sample_state)
+dobj_model.fit_to_vectors(sample_vectors, use_sample=sample_state)
 dobj_model.asimmetric_glove(dim)
 
 nsubj_model = Glove_Model(model_name='nsubj', paths=paths)
 nsubj_model.set_context(amod_model)
-nsubj_model.fit_to_vectors(vectors, use_sample=sample_state)
+nsubj_model.fit_to_vectors(sample_vectors, use_sample=sample_state)
 nsubj_model.asimmetric_glove(dim)
 
 
@@ -64,7 +64,12 @@ for epoch in range(epochs):
                     512)
         shared_emb = np.array(model.get_weights()[0].reshape(context_size, dim))
 
-        
+for model in models:
+    model.save_model()
+
+utils.write_context_embeddings(models)
+utils.write_focal_embeddings(models, paths)
+
 new_ppmis = []
 ppmis = []
 model_tags = []
@@ -85,5 +90,5 @@ for index, columns in enumerate(data_names):
 
 sns.set(style="whitegrid")
 sns.scatterplot(x='real_values', y='model_values', hue='model', palette=['r', 'b', 'g'], data=vr)
-plt.savefig(os.getcwd()+'/as_glove_original-predictec-values')
+plt.savefig(os.getcwd()+'/as_glove_evaluation_data-aptsample_vd-100')
 
