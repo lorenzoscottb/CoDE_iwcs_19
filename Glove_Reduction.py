@@ -1,4 +1,4 @@
-__author__ = 'lb540'
+
 
 from __future__ import division
 import os
@@ -145,6 +145,10 @@ class Glove_Model():
 
         return self.focal_vocabulary
 
+    @property
+    def ppmis(self):
+        return self.__counts
+
     def asimmetric_glove(self, dimension):
 
         self.CENTRAL_EMBEDDINGS = 'central_embeddings'
@@ -222,7 +226,7 @@ class Glove_Model():
         for layer in self.model.layers:
             if layer.name == 'context_embeddings':
                 layer.set_weights([weight])
-                
+
     def model_evaluation(self, context_embeddings=None, metric='spermanr'):
 
         print('running %s model evaluation:' %self.model_name)
@@ -302,7 +306,7 @@ class Glove_Model():
 
             print('computing SPerman correlation...')
             return spearmanr(ppmis, new_ppmis), new_ppmis
-                
+
     def save_model(self):
 
         new_model = Compressed_model(self.model_name,
@@ -313,15 +317,15 @@ class Glove_Model():
 
         save_object(new_model, self.model_name)
         print('saved a reduced version of %s model...' % self.model_name)
-    
+
     def load_model(self, model_object_dir):
-        
+
         print('loading pre-trained model...')
         import pickle
 
         with open(model_object_dir, 'rb') as f:
             load_model = pickle.load(f)
-        
+
         self.model_name = load_model.name
         self.context_vocabulary_id = load_model.ct_v
         self.focal_vocabulary_id = load_model.fcl_v
@@ -363,6 +367,7 @@ def custom_loss(y_true, y_pred, X_MAX = 100, a = 3.0 / 4.0):
     return K.sum(K.pow(K.clip(y_true / X_MAX, 0.0, 1.0), a) *
                  K.square(y_pred - K.log(y_true)), axis=-1)
 
+
 @jit()
 def weights_f(x, X_MAX = 100, a = 3.0 / 4.0):
 
@@ -395,6 +400,7 @@ def frobenius_distance(matrix_a, matrix_b):
 
     return np.sqrt(trace.item())
 
+
 @jit()
 def jsd(p, q, base=np.e):
     import scipy as sp
@@ -421,4 +427,3 @@ class Compressed_model():
         self.focal_vocabulary_id = fcl_v
         self.co_occ = co_occ
         self.model = emb_model
-        
