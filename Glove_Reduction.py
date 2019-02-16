@@ -1,210 +1,139 @@
 
 from __future__ import division
-from collections import Counter, defaultdict
 import os
-from random import shuffle
-import tensorflow as tf
-import numpy as np
-from apt_toolkit.utils import vector_utils as vu
 from numba import jit
+from apt_toolkit.utils import vector_utils as vu
+from keras.layers import Input, Embedding, Dot, Reshape, Add
+from keras.models import Model
+from keras.optimizers import Adam
 
 
-class NotTrainedError(Exception):
-    pass
+class Glove_Model():
 
-class NotFitToCorpusError(Exception):
-    pass
+    def __init__(self, model_name, paths, merging_operator='->'):
 
-class Model():
-    def __init__(self, context_size=5, max_vocab_size=10000000, min_occurrences=1,
-                cooccurrence_cap=100, batch_size=512, model_name=None):
-        if isinstance(context_size, tuple):
-            self.left_context, self.right_context = context_size
-        elif isinstance(context_size, int):
-            self.left_context = self.right_context = context_size
-        else:
-            raise ValueError("`context_size` should be an int or a tuple of two ints")
         self.model_name = model_name
-        self.max_vocab_size = max_vocab_size
-        self.min_occurrences = min_occurrences
-        self.cooccurrence_cap = cooccurrence_cap
-        self.batch_size = batch_size
-        self.dict_size = 0
         self.__vocab_size = None
         self.__words = None
-        self.__context_words = None
-        self.__context_words_to_id = None
-        self.__word_to_id = None
-        self.__cooccurrence_matrix = None
+        self.context_vocabulary_id = None
+        self.context_vocabulary = None
+        self.focal_vocabulary_id = None
+        self.focal_vocabulary = None
+        self.paths = paths
+        self.__co_occurrences = None
+        self.mrg = merging_operator
 
-    def reset_model(self):
-        self.dict_size = None
-        self.__words = None
-        self.__context_words = None
-        self.__context_words_to_id = None
-        self.__word_to_id = None
-        self.__cooccurrence_matrix = None
+    def fit_to_vectors(self, vectors, use_sample=False):
+        print('\nfitting the %s GloVe model...' %self.model_name)
+        vectors = self.load_apt(vectors)
+        if use_sample:
+            print('using a semple of the overall vectors...')
+            vectors = vector_sample(vectors)
 
-    def path_and_fit(self, vectors, prepare_batches=True, save_training_set=False, pretrain_dataset=''):
-        if self.dict_size == 0:
-            self.dict_size = len(vectors.keys())
-        self.__context_words = vectors.keys()
-        self.vocab_path = apt_path_matrix(vectors, self.model_name, path_depth=3)
-        # if self.vocab_size is None:
-        self.__vocab_size = len(self.vocab_path)
-        self.__fit_to_apt(self.vocab_path, vectors, self.max_vocab_size, self.min_occurrences,
-                             self.left_context, self.right_context)
-        self.__context_words_to_id = {word:number for number, word in
-                                      enumerate(self.__context_words)}
-        self.__dict_size = len(self.__context_words_to_id)
-        if pretrain_dataset:
-            print('loading pretrain dataset')
-            prepare_batches = False
-            self.load_data_set(pretrain_dataset)
-        if prepare_batches:
-            print('Preparing shared-batches...')
-            self.__i_indices, self.__j_indices, self.__counts = self.__shared_context_batches()
+        pp = self.possible_paths(vectors, self.model_name)
 
-        if save_training_set:
-            print('saving trainig set...')
-            i_j_count_matrix = [self.__i_indices, self.__j_indices, self.__counts]
-            save_object(i_j_count_matrix, self.model_name+'_training_set')
+        if not self.context_vocabulary:
+            self.context_vocabulary = self.ctx_v(vectors, self.paths)  # words_within_single_APT
+            self.context_vocabulary_id = {word: i for i, word in enumerate(self.context_vocabulary)}
 
-    def fit_to_apt(self, corpus, vectors, prepare_batches=True, save_training_set=False, pretrain_dataset=None):
-        self.__fit_to_apt(corpus, vectors, self.max_vocab_size, self.min_occurrences,
-                             self.left_context, self.right_context)
-        self.__context_words_to_id = {word:number for number, word in
-                                      enumerate(self.__context_words)}
-        self.__dict_size = len(self.__context_words_to_id)
-        if pretrain_dataset:
-            prepare_batches = False
-            self.load_data_set()
-        if prepare_batches:
-            print('Preparing shared-batches...')
-            self.__i_indices, self.__j_indices, self.__counts = self.__shared_context_batches()
+        self.focal_vocabulary = self.fcl_v(vectors, pp)  # vocab->path (for each path)
+        self.focal_vocabulary_id = {word: i for i, word in enumerate(self.focal_vocabulary)}
 
-        if save_training_set:
-            print('saving trainig set...')
-            vocabularies = [self.__words, self.__context_words]
-            i_j_count_matrix = [self.__i_indices, self.__j_indices, self.__counts]
-            save_object(i_j_count_matrix, self.model_name+'_training_set')
-            save_object(vocabularies, self.model_name+'_vocabularies')
+        self.__co_occurrences = self.__prepare_training_set(vectors)
 
-    def __fit_to_apt(self, corpus, vectors, vocab_size, min_occurrences, left_size, right_size):
-        cooccurrence_matrix = {}
-        word_counts = Counter()
-        cooccurrence_counts = defaultdict(float)
-        print('Preparing corpus...')
-        for region in corpus:
-            word_counts.update(region)
-            for l_context, word, r_context in _context_windows(region, left_size, right_size):
-                for i, context_word in enumerate(l_context[::-1]):
-                    # add (1 / distance from focal word) for this pair
-                    cooccurrence_counts[(word, context_word)] += 1 / (i + 1)
-                for i, context_word in enumerate(r_context):
-                    cooccurrence_counts[(word, context_word)] += 1 / (i + 1)
-        if len(cooccurrence_counts) == 0:
-            raise ValueError("No coccurrences in corpus. Did you try to reuse a generator?")
-        self.__words = [word for word, count in word_counts.most_common(vocab_size)
-                        if count >= min_occurrences]
-        print('Preparing word ID...')
-        self.__word_to_id = {word: i for i, word in enumerate(self.__words)}
-        # for words, count in cooccurrence_counts.items():
-        #     print(words)
-        #     break
-        print('Building matrix..')
-        # extract wich is path wich word for ppmi value extraction
-        for count, co_set in enumerate(cooccurrence_counts.items()):
-            # print(co_set)
-            if co_set[0][1] in self.__word_to_id and co_set[0][0] in self.__word_to_id:
-                if count % 2 == 0:
-                    wrd = co_set[0][1]
-                    pt = co_set[0][0]
-                    cooccurrence_matrix[(self.__word_to_id[pt], self.__word_to_id[wrd])] = vectors[wrd][pt]
-                else:
-                    wrd = co_set[0][0]
-                    pt = co_set[0][1]
-                # print(count, wrd, pt)
-                    cooccurrence_matrix[(self.__word_to_id[wrd], self.__word_to_id[pt])] = vectors[wrd][pt]
-                # print(count, wrd, pt)
-            self.__cooccurrence_matrix = cooccurrence_matrix
+        self.__i_indices, self.__j_indices, self.__counts = zip(*self.__co_occurrences)
+        print('fitting completed...')
 
-    def training_batch(self):
+    @jit(parallel=True)
+    def load_apt(self, vec_dir):
+        return vu.load_vector_cache(vector_in_file=vec_dir)
 
-        batches = list(_batchify(self.batch_size, self.__i_indices, self.__j_indices, self.__counts))
-        shuffle(batches)
-        for batch_index, batch in enumerate(batches):
-            i_s, j_s, counts = batch
+    @jit(parallel=True)
+    def possible_paths(self, vectors, path_end, path_depth=3):
+        print('collectiong possible word_paths...')
+        pp = set([paths.split(':')[0] for word in vectors.keys()
+                  for paths in vectors[word]
+                  if paths.split(':')[0].endswith(path_end) and
+                  len(paths.split(':')[0].split('»')) <= path_depth])
 
-        return i_s, j_s, counts
+        return list(pp)
 
+    @jit(parallel=True)
+    def local_context(self, vectors, path_end, path_depth=3):
+
+        ctx_v = set([paths.split(':')[1] for word in vectors.keys()
+                     for paths in vectors[word]
+                     if paths.split(':')[0].endswith(path_end) and
+                     len(paths.split(':')[0].split('»')) <= path_depth])
+
+        return list(ctx_v)
+
+    @jit(parallel=True)
+    def ctx_v(self, vectors, paths):
+        print('collecting global context vocabulary...')
+        word = []
+
+        for path in paths:
+            word += self.local_context(vectors, path)
+
+        print('compleated. Context-vocabulary has len: %s' % len(word))
+
+        return set(word)
+
+    @jit(parallel=True)
+    def fcl_v(self, vectors, possible_paths):
+
+        print('collecting focal vocabulary...')
+        words = [word + self.mrg + path for path in possible_paths
+                for word in vectors.keys()]
+
+        print('compleated. Focal-vocabulary has len: %s' % len(words))
+
+        return words
+
+    @jit(parallel=True)
+    def __prepare_training_set(self, vectors):
+        # 15/02/2019: we will train just over existing ctxw_psths,
+        # rest will have random embeddings
+        print('preparing training set...')
+
+        co_occ = [
+                 (self.focal_vocabulary_id[word + self.mrg + p_c.split(':')[0]],
+                  self.context_vocabulary_id[p_c.split(':')[1]],
+                  vectors[word][p_c])
+                  for word in vectors.keys() for p_c in vectors[word].keys()
+                  if p_c.split(':')[0].endswith(self.model_name) and
+                  len(p_c.split(':')[0].split('»')) < 4
+                  ]
+
+        # co_occ_clm = [
+        #               (self.focal_vocabulary_id[focal],
+        #               self.context_vocabulary_id[context],
+        #               vectors[focal.split(self.mrg, 1)[0]][focal.split(self.mrg, 1)[1] + ':' + context])
+        #               for focal in self.focal_vocabulary for context in self.context_vocabulary
+        #               # if focal.split(self.mrg, 1)[1] + ':' + context in vectors[focal.split(self.mrg, 1)[0]]
+        #               ]
+        # co_occ_row = [(context_vocabulary_id[context],
+        #               focal_vocabulary_id[focal],
+        #               vectors[focal.split('.', 1)[0]][focal.split('.', 1)[1] + ':' + context])
+        #              for focal in self.focal_vocabulary for context in self.context_vocabulary]
+        #
+        # co_occ = co_oc_clm + co_oc_row
+
+        return co_occ
+
+    @jit(parallel=True)
     def training_set(self):
 
         return self.__i_indices, self.__j_indices, self.__counts
 
-    def __prepare_batches(self):
-        if self.__cooccurrence_matrix is None:
-            raise NotFitToCorpusError(
-                "Need to fit model to corpus before preparing training batches.")
-        cooccurrences = [(word_ids[0], word_ids[1], count)
-                         for word_ids, count in self.__cooccurrence_matrix.items()]
-        i_indices, j_indices, counts = zip(*cooccurrences)
-        return list(_batchify(self.batch_size, i_indices, j_indices, counts))
+    def set_context(self, glove_object):
 
-    def __shared_context_batches(self):
-        print('collecting batches...')
-        # TOCHECK: j_indices must refer to diffrent matrix!!!
-        print('start the collection...')
-        shared_cooccurrences = [(word_ids[0],
-                                 self.__context_words_to_id[_key_by_value(self.__context_words_to_id, word_ids[1])],
-                                  count)
-                               for word_ids, count in self.__cooccurrence_matrix.items()
-                               if word_ids[1] < self.__dict_size
-                               and _key_by_value(self.__context_words_to_id, word_ids[1]) in self.__context_words]
-        i_indices, j_indices, counts = zip(*shared_cooccurrences)
-        return i_indices, j_indices, counts
-
-    @property
-    def vocab_size(self):
-        return len(self.__words)
-
-    @property
-    def ppmis(self):
-        return self.__counts
-
-    @property
-    def words(self):
-        if self.__words is None:
-            raise NotFitToCorpusError("Need to fit model to corpus before accessing words.")
-        return self.__words
-
-    @property
-    def context_words(self):
-        if self.__context_words is None:
-            raise NotFitToCorpusError("Need to fit model to corpus before accessing words.")
-        return self.__context_words
-
-    @property
-    def embeddings(self):
-        if self.__embeddings is None:
-            raise NotTrainedError("Need to train model before accessing embeddings")
-        return self.__embeddings
-
-    def id_for_word(self, word):
-        if self.__word_to_id is None:
-            raise NotFitToCorpusError("Need to fit model to corpus before looking up word ids.")
-        return self.__word_to_id[word]
+        print('importing existing context vocabulary...')
+        self.context_vocabulary = glove_object.context_vocabulary
+        self.context_vocabulary_id = glove_object.context_vocabulary_id
 
     def asimmetric_glove(self, dimension):
-
-        from keras.layers import Input, Embedding, Dot, Reshape, Add
-        from keras.models import Model
-        from keras.optimizers import Adam
-        import os
-        import numpy as np
-
-        self.OUTPUT_FOLDER = 'output/'
-        self.DATA_FOLDER = 'data/'
 
         self.CENTRAL_EMBEDDINGS = 'central_embeddings'
         self.CONTEXT_EMBEDDINGS = 'context_embeddings'
@@ -214,8 +143,8 @@ class Model():
         self.model = None
 
         self.vector_dim = dimension
-        self.focal_size = max(self.__i_indices)+1
-        self.context_sixe = max(self.__j_indices)+1
+        self.focal_size = len(self.focal_vocabulary)
+        self.context_size = len(self.context_vocabulary)
 
         """
         A Keras implementation of the GloVe architecture
@@ -223,6 +152,7 @@ class Model():
         :param vector_dim: The vector dimension of each word
         :return:
         """
+
         input_focal = Input((1,), name='central_word_id')
         input_context = Input((1,), name='context_word_id')
 
@@ -235,11 +165,11 @@ class Model():
                                  input_length=1,
                                  name=self.CENTRAL_BIASES)
 
-        context_embedding = Embedding(self.dict_size,
+        context_embedding = Embedding(self.context_size,
                                       self.vector_dim,
                                       input_length=1,
                                       name=self.CONTEXT_EMBEDDINGS)
-        context_bias = Embedding(self.dict_size,
+        context_bias = Embedding(self.context_size,
                                  1,
                                  input_length=1,
                                  name=self.CONTEXT_BIASES)
@@ -281,186 +211,14 @@ class Model():
             if layer.name == 'context_embeddings':
                 layer.set_weights([weight])
 
-    def np_tensor(self, x, y):
 
-        import numpy as np
-
-        return np.random.uniform(low=-1, high=1, size=(x, y))
-
-    def model_evaluation(self, context_embeddings=None, metric='spermanr'):
-
-        print('running %s model evaluation:' %self.model_name)
-        # from sklearn.metrics.pairwise import euclidean_distances
-
-        b_cntx = None
-        b_cntr = None
-        e_cntx = None
-        e_cntr = None
-
-        print('extracting embeddigns and wheights...')
-        for layer in self.model.layers:
-            if layer.name == self.CENTRAL_BIASES:
-                b_cntr = layer.get_weights()[0]
-
-            if layer.name == self.CENTRAL_EMBEDDINGS:
-                e_cntr = layer.get_weights()[0]
-
-            if layer.name == self.CONTEXT_BIASES:
-                b_cntx = layer.get_weights()[0]
-
-            if context_embeddings is None:
-                if layer.name == self.CONTEXT_EMBEDDINGS:
-                    e_cntx = layer.get_weights()[0]
-            else:
-                e_cntx = context_embeddings
-
-        if metric == 'frobenius':
-            original_matrix = np.zeros((e_cntr.shape[0], e_cntr.shape[0]))
-            new_matrix = np.zeros((e_cntr.shape[0], e_cntr.shape[0]))
-
-            i_s, j_s, ppmis = self.training_set()
-
-            differences = np.zeros((len(ppmis), 1))
-            print('collecting new matrix...')
-            for index, ppmi in enumerate(ppmis):
-                y = i_s[index]
-                x = j_s[index]
-
-                # print(x,y,ppmi)
-                original_matrix[y][x] = ppmi
-                new_matrix[y][x] = glove_reverse(b_cntx[x],
-                                                      b_cntr[y],
-                                                      e_cntx[x],
-                                                      e_cntr[y])
-            print('computing Frobenius distance...')
-            return frobenius_distance(original_matrix, new_matrix)
-
-        if metric == 'Jensen-Shannon':
-
-            i_s, j_s, ppmis = self.training_set()
-
-            new_ppmis = np.zeros(len(ppmis))
-            print('collecting new distribution...')
-            for index, ppmi in enumerate(ppmis):
-                new_ppmis[index] = glove_reverse(b_cntx[j_s[index]],
-                                                 b_cntr[i_s[index]],
-                                                 e_cntx[j_s[index]],
-                                                 e_cntr[i_s[index]])
-
-            print('computing Jensen-Shannon divergence...')
-            return jsd(ppmis, new_ppmis)
-
-        if metric == 'spermanr':
-
-            from scipy.stats.stats import spearmanr
-
-            i_s, j_s, ppmis = self.training_set()
-
-            new_ppmis = np.zeros(len(ppmis))
-            print('collecting new distribution...')
-            for index, ppmi in enumerate(ppmis):
-                new_ppmis[index] = glove_reverse(b_cntx[j_s[index]],
-                                                 b_cntr[i_s[index]],
-                                                 e_cntx[j_s[index]],
-                                                 e_cntr[i_s[index]])
-
-            print('computing SPerman correlation...')
-            return spearmanr(ppmis, new_ppmis), new_ppmis
-
-    def save_model(self, element_to_save=4):
-
-        """
-        part indicates how many of the possible elments to save
-        unsing the index as a referemnce
-        """
-
-        vocab = self.__word_to_id
-        context_vocab = self.__context_words_to_id
-
-        context_embeddings = self.get_weights()[0]
-        focal_embeddigns = self.get_weights(layer_name='central_embeddings')[0]
-
-        all = [vocab, context_vocab,context_embeddings, focal_embeddigns]
-        all_names = ['voca', 'context voca', 'context emb', 'focal emb']
-
-        for index, element in enumerate(all):
-            try:
-                if index ==element_to_save:
-                    break
-                save_object(element, all_names[index])
-            except:
-                print('impossible to save %s as is not present' % all_names[index])
-
-    def load_data_set(self,file_dir):
-
-        import pickle
-
-        with open(file_dir, 'rb') as f:
-            a = pickle.load(f)
-
-        self.__i_indices = tuple(a[0])
-        self.__j_indices = tuple(a[1])
-        self.__counts = tuple(a[2])
-
-
-def _context_windows(region, left_size, right_size):
-    for i, word in enumerate(region):
-        start_index = i - left_size
-        end_index = i + right_size
-        left_context = _window(region, start_index, i - 1)
-        right_context = _window(region, i + 1, end_index)
-        yield (left_context, word, right_context)
-
-
-def _window(region, start_index, end_index):
-    """
-    Returns the list of words starting from `start_index`, going to `end_index`
-    taken from region. If `start_index` is a negative number, or if `end_index`
-    is greater than the index of the last word in region, this function will pad
-    its return value with `NULL_WORD`.
-    """
-    last_index = len(region) + 1
-    selected_tokens = region[max(start_index, 0):min(end_index, last_index) + 1]
-    return selected_tokens
-
-
-def apt_path_matrix(vectors, path_end='amod', path_depth=3):
-
-    print('preparing co-occ matrix for %s path' %path_end)
-    vocab_path = []
-    for cnt, word in enumerate(vectors.keys()):
-        paths = list(vectors[word].keys())
-        for cnt2, path in enumerate(paths):
-            if type(path) is str:    # for some reasons weird stuff can appear instead of paths..
-                clean_path, end_path = (path.replace('»', ' ')).split(':', 1)
-            if len(clean_path.split()) <= path_depth and clean_path.endswith(path_end):
-                vocab_path.append([path, word])
-            # ppmi_value = vectors[word][path]
-
-    vocab_size = len(vocab_path)
-
-    print('done,the', path_end, 'vocabulary len is', vocab_size)
-
-    return vocab_path
-
-
-def _batchify(batch_size, *sequences):
-    for i in range(0, len(sequences[0]), batch_size):
-        yield tuple(sequence[i:i+batch_size] for sequence in sequences)
-
-
-def _plot_with_labels(low_dim_embs, labels, path, size):
-    import matplotlib.pyplot as plt
-    assert low_dim_embs.shape[0] >= len(labels), "More labels than embeddings"
-    figure = plt.figure(figsize=size)  # in inches
-    for i, label in enumerate(labels):
-        x, y = low_dim_embs[i, :]
-        plt.scatter(x, y)
-        plt.annotate(label, xy=(x, y), xytext=(5, 2), textcoords='offset points', ha='right',
-                     va='bottom')
-    if path is not None:
-        figure.savefig(path)
-        plt.close(figure)
+def vector_sample(vectors, sample=3):
+    vv = {}
+    for i, v in enumerate(vectors.keys()):
+        vv[v] = vectors[v]
+        if i == sample:
+            break
+    return vv
 
 
 def _key_by_value(mydict, value):
@@ -468,7 +226,6 @@ def _key_by_value(mydict, value):
 
 
 def save_object(object, name, dir=os.getcwd()):
-
     import pickle
 
     with open(dir + '/' + name + '.pkl', 'wb') as f:
@@ -487,53 +244,4 @@ def custom_loss(y_true, y_pred, X_MAX = 100, a = 3.0 / 4.0):
     """
     return K.sum(K.pow(K.clip(y_true / X_MAX, 0.0, 1.0), a) *
                  K.square(y_pred - K.log(y_true)), axis=-1)
-
-
-@jit()
-def weights_f(x, X_MAX = 100, a = 3.0 / 4.0):
-
-    if x < X_MAX:
-        return np.power((x/X_MAX), a)
-
-    else:
-        return 1.0
-
-
-@jit()
-def glove_reverse(b_c, b_f, v_c, v_f, weight=False):
-
-    x = np.power(2, np.inner(v_c, v_f) + b_c + b_f)
-    if weight:
-        x = weights_f(x)
-
-    return x
-
-
-@jit()
-def frobenius_distance(matrix_a, matrix_b):
-
-    #  F(a,b) = sqr(trace((a-b)*(a-b)trnsp))
-
-    a = np.matrix(matrix_a)
-    b = np.matrix(matrix_b)
-    t_b = b.getH()
-    trace = ((a-b)*(a-b).getH()).trace()
-
-    return np.sqrt(trace.item())
-
-@jit()
-def jsd(p, q, base=np.e):
-    import scipy as sp
-
-    '''
-        from 
-        Implementation of pairwise `jsd` based on  
-        https://en.wikipedia.org/wiki/Jensen%E2%80%93Shannon_divergence
-    '''
-    ## convert to np.array
-    p, q = np.asarray(p), np.asarray(q)
-    ## normalize p, q to probabilities
-    p, q = p/p.sum(), q/q.sum()
-    m = 1./2*(p + q)
-    return sp.stats.entropy(p,m, base=base)/2. +  sp.stats.entropy(q, m, base=base)/2.
 
