@@ -1,6 +1,8 @@
+__author__ = 'lb540'
 
 from __future__ import division
 import os
+import numpy as np
 from numba import jit
 from apt_toolkit.utils import vector_utils as vu
 from keras.layers import Input, Embedding, Dot, Reshape, Add
@@ -98,12 +100,12 @@ class Glove_Model():
         print('preparing training set...')
 
         co_occ = [
-                 (self.focal_vocabulary_id[word + self.mrg + p_c.split(':')[0]],
-                  self.context_vocabulary_id[p_c.split(':')[1]],
-                  vectors[word][p_c])
-                  for word in vectors.keys() for p_c in vectors[word].keys()
-                  if p_c.split(':')[0].endswith(self.model_name) and
-                  len(p_c.split(':')[0].split('»')) < 4
+                  (self.focal_vocabulary_id[word + self.mrg + p_c.split(':')[0]],
+                   self.context_vocabulary_id[p_c.split(':')[1]],
+                   vectors[word][p_c])
+                   for word in vectors.keys() for p_c in vectors[word].keys()
+                   if p_c.split(':')[0].endswith(self.model_name) and
+                   len(p_c.split(':')[0].split('»')) < 4
                   ]
 
         # co_occ_clm = [
@@ -132,6 +134,16 @@ class Glove_Model():
         print('importing existing context vocabulary...')
         self.context_vocabulary = glove_object.context_vocabulary
         self.context_vocabulary_id = glove_object.context_vocabulary_id
+
+    @property
+    def context_words(self):
+
+        return self.context_vocabulary
+
+    @property
+    def focal_words(self):
+
+        return self.focal_vocabulary
 
     def asimmetric_glove(self, dimension):
 
@@ -210,6 +222,112 @@ class Glove_Model():
         for layer in self.model.layers:
             if layer.name == 'context_embeddings':
                 layer.set_weights([weight])
+                
+    def model_evaluation(self, context_embeddings=None, metric='spermanr'):
+
+        print('running %s model evaluation:' %self.model_name)
+        # from sklearn.metrics.pairwise import euclidean_distances
+
+        b_cntx = None
+        b_cntr = None
+        e_cntx = None
+        e_cntr = None
+
+        print('extracting embeddigns and wheights...')
+        for layer in self.model.layers:
+            if layer.name == self.CENTRAL_BIASES:
+                b_cntr = layer.get_weights()[0]
+
+            if layer.name == self.CENTRAL_EMBEDDINGS:
+                e_cntr = layer.get_weights()[0]
+
+            if layer.name == self.CONTEXT_BIASES:
+                b_cntx = layer.get_weights()[0]
+
+            if context_embeddings is None:
+                if layer.name == self.CONTEXT_EMBEDDINGS:
+                    e_cntx = layer.get_weights()[0]
+            else:
+                e_cntx = context_embeddings
+
+        if metric == 'frobenius':
+            original_matrix = np.zeros((e_cntr.shape[0], e_cntr.shape[0]))
+            new_matrix = np.zeros((e_cntr.shape[0], e_cntr.shape[0]))
+
+            i_s, j_s, ppmis = self.training_set()
+
+            differences = np.zeros((len(ppmis), 1))
+            print('collecting new matrix...')
+            for index, ppmi in enumerate(ppmis):
+                y = i_s[index]
+                x = j_s[index]
+
+                # print(x,y,ppmi)
+                original_matrix[y][x] = ppmi
+                new_matrix[y][x] = glove_reverse(b_cntx[x],
+                                                      b_cntr[y],
+                                                      e_cntx[x],
+                                                      e_cntr[y])
+            print('computing Frobenius distance...')
+            return frobenius_distance(original_matrix, new_matrix)
+
+        if metric == 'Jensen-Shannon':
+
+            i_s, j_s, ppmis = self.training_set()
+
+            new_ppmis = np.zeros(len(ppmis))
+            print('collecting new distribution...')
+            for index, ppmi in enumerate(ppmis):
+                new_ppmis[index] = glove_reverse(b_cntx[j_s[index]],
+                                                 b_cntr[i_s[index]],
+                                                 e_cntx[j_s[index]],
+                                                 e_cntr[i_s[index]])
+
+            print('computing Jensen-Shannon divergence...')
+            return jsd(ppmis, new_ppmis)
+
+        if metric == 'spermanr':
+
+            from scipy.stats.stats import spearmanr
+
+            i_s, j_s, ppmis = self.training_set()
+
+            new_ppmis = np.zeros(len(ppmis))
+            print('collecting new distribution...')
+            for index, ppmi in enumerate(ppmis):
+                new_ppmis[index] = glove_reverse(b_cntx[j_s[index]],
+                                                 b_cntr[i_s[index]],
+                                                 e_cntx[j_s[index]],
+                                                 e_cntr[i_s[index]])
+
+            print('computing SPerman correlation...')
+            return spearmanr(ppmis, new_ppmis), new_ppmis
+                
+    def save_model(self):
+
+        new_model = Compressed_model(self.model_name,
+                                     self.context_vocabulary_id,
+                                     self.context_vocabulary_id,
+                                     self.__co_occurrences,
+                                     self.model)
+
+        save_object(new_model, self.model_name)
+        print('saved a reduced version of %s model...' % self.model_name)
+    
+    def load_model(self, model_object_dir):
+        
+        print('loading pre-trained model...')
+        import pickle
+
+        with open(model_object_dir, 'rb') as f:
+            load_model = pickle.load(f)
+        
+        self.model_name = load_model.name
+        self.context_vocabulary_id = load_model.ct_v
+        self.focal_vocabulary_id = load_model.fcl_v
+        self.__co_occurrences = load_model.co_occ
+        self.__i_indices, self.__j_indices, self.__counts = zip(*self.__co_occurrences)
+        self.model = load_model.emb_model
 
 
 def vector_sample(vectors, sample=3):
@@ -245,3 +363,62 @@ def custom_loss(y_true, y_pred, X_MAX = 100, a = 3.0 / 4.0):
     return K.sum(K.pow(K.clip(y_true / X_MAX, 0.0, 1.0), a) *
                  K.square(y_pred - K.log(y_true)), axis=-1)
 
+@jit()
+def weights_f(x, X_MAX = 100, a = 3.0 / 4.0):
+
+    if x < X_MAX:
+        return np.power((x/X_MAX), a)
+
+    else:
+        return 1.0
+
+
+@jit()
+def glove_reverse(b_c, b_f, v_c, v_f, weight=False):
+
+    x = np.power(2, np.inner(v_c, v_f) + b_c + b_f)
+    if weight:
+        x = weights_f(x)
+
+    return x
+
+
+@jit()
+def frobenius_distance(matrix_a, matrix_b):
+
+    #  F(a,b) = sqr(trace((a-b)*(a-b)trnsp))
+
+    a = np.matrix(matrix_a)
+    b = np.matrix(matrix_b)
+    t_b = b.getH()
+    trace = ((a-b)*(a-b).getH()).trace()
+
+    return np.sqrt(trace.item())
+
+@jit()
+def jsd(p, q, base=np.e):
+    import scipy as sp
+
+    '''
+        from 
+        Implementation of pairwise `jsd` based on  
+        https://en.wikipedia.org/wiki/Jensen%E2%80%93Shannon_divergence
+    '''
+    ## convert to np.array
+    p, q = np.asarray(p), np.asarray(q)
+    ## normalize p, q to probabilities
+    p, q = p/p.sum(), q/q.sum()
+    m = 1./2*(p + q)
+    return sp.stats.entropy(p,m, base=base)/2. + sp.stats.entropy(q, m, base=base)/2.
+
+
+class Compressed_model():
+
+    def __init__(self, name, ct_v, fcl_v, co_occ, emb_model):
+
+        self.model_name = name
+        self.context_vocabulary_id = ct_v
+        self.focal_vocabulary_id = fcl_v
+        self.co_occ = co_occ
+        self.model = emb_model
+        
