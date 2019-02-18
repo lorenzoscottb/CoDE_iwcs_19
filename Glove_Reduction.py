@@ -333,7 +333,7 @@ class Glove_Model():
         self.focal_vocabulary = load_model.focal_vocabulary_id.keys()
         self.__co_occurrences = load_model.co_occ
         self.__i_indices, self.__j_indices, self.__counts = zip(*self.__co_occurrences)
-        self.asimmetric_glove(10)
+        self.asimmetric_glove(load_model.model.get_weights()[0].shape[1])
         self.model.set_weights(load_model.weights)
 
         # self.model.set_weights(load_model.weights)
