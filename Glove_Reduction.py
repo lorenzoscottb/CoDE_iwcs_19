@@ -311,9 +311,9 @@ class Glove_Model():
 
         new_model = Compressed_model(self.model_name,
                                      self.context_vocabulary_id,
-                                     self.context_vocabulary_id,
+                                     self.focal_vocabulary_id,
                                      self.__co_occurrences,
-                                     self.model)
+                                     self.model.get_weights())
 
         save_object(new_model, self.model_name)
         print('saved a reduced version of %s model...' % self.model_name)
@@ -322,16 +322,21 @@ class Glove_Model():
 
         print('loading pre-trained model...')
         import pickle
-
+        #
         with open(model_object_dir, 'rb') as f:
             load_model = pickle.load(f)
 
-        self.model_name = load_model.name
-        self.context_vocabulary_id = load_model.ct_v
-        self.focal_vocabulary_id = load_model.fcl_v
+        self.model_name = load_model.model_name
+        self.context_vocabulary_id = load_model.context_vocabulary_id
+        self.context_vocabulary = self.context_vocabulary_id.keys()
+        self.focal_vocabulary_id = load_model.focal_vocabulary_id
+        self.focal_vocabulary = load_model.focal_vocabulary_id.keys()
         self.__co_occurrences = load_model.co_occ
         self.__i_indices, self.__j_indices, self.__counts = zip(*self.__co_occurrences)
-        self.model = load_model.emb_model
+        self.asimmetric_glove(10)
+        self.model.set_weights(load_model.weights)
+
+        # self.model.set_weights(load_model.weights)
 
 
 def vector_sample(vectors, sample=3):
@@ -420,10 +425,11 @@ def jsd(p, q, base=np.e):
 
 class Compressed_model():
 
-    def __init__(self, name, ct_v, fcl_v, co_occ, emb_model):
+    def __init__(self, name, ct_v, fcl_v, co_occ, weights):
 
         self.model_name = name
         self.context_vocabulary_id = ct_v
         self.focal_vocabulary_id = fcl_v
         self.co_occ = co_occ
-        self.model = emb_model
+        self.weights = weights
+
