@@ -433,3 +433,4 @@ class Compressed_model():
         self.co_occ = co_occ
         self.weights = weights
 
+
