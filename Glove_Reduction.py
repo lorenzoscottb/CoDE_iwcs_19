@@ -24,6 +24,7 @@ class Glove_Model():
         self.paths = paths
         self.__co_occurrences = None
         self.mrg = merging_operator
+        self.model = None
 
     def fit_to_vectors(self, vectors, use_sample=False):
         print('\nfitting the %s GloVe model...' %self.model_name)
@@ -150,13 +151,23 @@ class Glove_Model():
         return self.__counts
 
     def asimmetric_glove(self, dimension):
+        
+        import tensorflow as tf
+        from keras.backend.tensorflow_backend import set_session
+
+        # set limit to Keras' expansion on GPU
+        from keras.backend.tensorflow_backend import set_session
+        import tensorflow as tf
+        config = tf.ConfigProto()
+        config.gpu_options.allow_growth = True  # dynamically grow the memory used on the GPU
+        config.log_device_placement = True  # to log device placement (on which device the operation ran)
+        sess = tf.Session(config=config)
+        set_session(sess)  # set this TensorFlow session as the default session for Keras
 
         self.CENTRAL_EMBEDDINGS = 'central_embeddings'
         self.CONTEXT_EMBEDDINGS = 'context_embeddings'
         self.CENTRAL_BIASES = 'central_biases'
         self.CONTEXT_BIASES = 'context_biases'
-
-        self.model = None
 
         self.vector_dim = dimension
         self.focal_size = len(self.focal_vocabulary)
