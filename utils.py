@@ -27,7 +27,7 @@ def write_focal_embeddings(models, paths):
         embeddings = model.get_weights(layer_name='central_embeddings')[0]
         file = open(os.getcwd()+'/'+paths[index]+'_focal_embeddigns.txt', 'w')
         for i, word in enumerate(vocab):
-            file.write('en_' + word + ' ' + str(list(embeddings[i-1])).replace(',', '').strip('[').strip(']') + '\n')
+            file.write('en_' + word + ' ' + str(list(embeddings[i])).replace(',', '').strip('[').strip(']') + '\n')
             # break
         file.close()
         
