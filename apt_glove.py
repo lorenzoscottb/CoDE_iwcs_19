@@ -12,7 +12,7 @@ from keras.optimizers import Adam
 
 class Glove_Model():
 
-    def __init__(self, model_name, paths=['amod', 'dobj', 'nsubj'], merging_operator='->', max_depth=3):
+    def __init__(self, model_name, paths=['amod', 'dobj', 'nsubj'], merging_operator='->', max_depth=2):
 
         self.model_name = model_name
         self.context_vocabulary_id = None
@@ -29,7 +29,7 @@ class Glove_Model():
         vectors = self.load_apt(vectors)
 
         if not self.context_vocabulary:
-            self.context_vocabulary = self.ctx_v(vectors, self.paths)  # words within single lexems
+            self.context_vocabulary = self.ctx_v(vectors, self.paths, self.max_depth)  # words within single lexems
             self.context_vocabulary_id = {word: i for i, word in enumerate(self.context_vocabulary)}
 
         if use_sample:
@@ -67,7 +67,7 @@ class Glove_Model():
         return list(pp)
 
     @jit(parallel=True)
-    def local_context(self, vectors, path_end, path_depth=3):
+    def local_context(self, vectors, path_end, path_depth):
 
         ctx_v = set([paths.split(':')[1] for word in vectors.keys()
                      for paths in vectors[word]
@@ -77,12 +77,12 @@ class Glove_Model():
         return list(ctx_v)
 
     @jit(parallel=True)
-    def ctx_v(self, vectors, paths):
+    def ctx_v(self, vectors, paths, path_depth):
         print('collecting global context vocabulary...')
         word = []
 
         for path in paths:
-            word += self.local_context(vectors, path)
+            word += self.local_context(vectors, path, path_depth)
 
         print('compleated. Context-vocabulary has len: %s' % len(word))
 
@@ -473,5 +473,4 @@ class Compressed_model():
         self.focal_vocabulary_id = fcl_v
         self.co_occ = co_occ
         self.weights = weights
-
 
