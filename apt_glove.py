@@ -12,7 +12,7 @@ from keras.optimizers import Adam
 
 class Glove_Model():
 
-    def __init__(self, model_name, paths, merging_operator='->'):
+    def __init__(self, model_name, paths=['amod', 'dobj', 'nsubj'], merging_operator='->', max_depth=3):
 
         self.model_name = model_name
         self.context_vocabulary_id = None
@@ -20,27 +20,35 @@ class Glove_Model():
         self.focal_vocabulary_id = None
         self.focal_vocabulary = None
         self.paths = paths
+        self.max_depth = max_depth
         self.__co_occurrences = None
         self.mrg = merging_operator
 
-    def fit_to_vectors(self, vectors, use_sample=False):
+    def fit_to_vectors(self, vectors, use_sample=False, use_possible_paths=False):
         print('\nfitting the %s GloVe model...' %self.model_name)
         vectors = self.load_apt(vectors)
-        if use_sample:
-            print('using a semple of the overall vectors...')
-            vectors = vector_sample(vectors)
-
-        self.possible_paths = self.collect_paths(vectors, self.model_name)
 
         if not self.context_vocabulary:
             self.context_vocabulary = self.ctx_v(vectors, self.paths)  # words within single lexems
             self.context_vocabulary_id = {word: i for i, word in enumerate(self.context_vocabulary)}
 
-        self.focal_vocabulary = self.fcl_v(vectors, self.possible_paths)  # vocab->path (for each path)
-        self.focal_vocabulary_id = {word: i for i, word in enumerate(self.focal_vocabulary)}
+        if use_sample:
+            print('using a semple of the overall vectors...')
+            vectors = vector_sample(vectors)
 
-        self.__co_occurrences = self.__prepare_training_set(vectors)
+        if use_possible_paths:
+            self.possible_paths = self.collect_paths(vectors, self.model_name, self.max_depth)
+            self.focal_vocabulary = self.fcl_v_pp(vectors, self.possible_paths)  # vocab->path (for all possible path)
+            self.focal_vocabulary_id = {word: i for i, word in enumerate(self.focal_vocabulary)}
+            self.__co_occurrences = self.__prepare_training_set_pp(vectors)
 
+        else:
+            self.focal_vocabulary = self.fcl_v(vectors)  # vocab->path (for existing path)
+            self.focal_vocabulary_id = {word: i for i, word in enumerate(self.focal_vocabulary)}
+            self.__co_occurrences = self.__prepare_training_set(vectors)
+
+
+        # input_focal, input_context, (real)ppmi values
         self.__i_indices, self.__j_indices, self.__counts = zip(*self.__co_occurrences)
         print('fitting completed...')
 
@@ -49,7 +57,7 @@ class Glove_Model():
         return vu.load_vector_cache(vector_in_file=vec_dir)
 
     @jit(parallel=True)
-    def collect_paths(self, vectors, path_end, path_depth=3):
+    def collect_paths(self, vectors, path_end, path_depth):
         print('collectiong possible word_paths...')
         pp = set([paths.split(':')[0] for word in vectors.keys()
                   for paths in vectors[word]
@@ -81,9 +89,22 @@ class Glove_Model():
         return set(word)
 
     @jit(parallel=True)
-    def fcl_v(self, vectors, possible_paths):
+    def fcl_v(self, vectors):
 
         print('collecting focal vocabulary...')
+        words = [
+                word + self.mrg + path.split(':')[0]
+                for word in vectors.keys() for path in vectors[word].keys()
+                if path.split(':')[0].endswith(self.model_name) and
+                len(path.split(':')[0].split('»')) < (self.max_depth + 1)
+                ]
+
+        return words
+
+    @jit(parallel=True)
+    def fcl_v_pp(self, vectors, possible_paths):
+
+        print('collecting possible-paths focal vocabulary...')
         words = [word + self.mrg + path for path in possible_paths
                 for word in vectors.keys()]
 
@@ -93,6 +114,23 @@ class Glove_Model():
 
     @jit(parallel=True)
     def __prepare_training_set(self, vectors):
+        # 15/02/2019: we will train just over existing ctxw_psths,
+        # rest will have random embeddings
+        print('preparing training set...')
+
+        co_occ = [
+                  (self.focal_vocabulary_id[word + self.mrg + feature.split(':')[0]],
+                   self.context_vocabulary_id[feature.split(':')[1]],
+                   vectors[word][feature])
+                   for word in vectors.keys() for feature in vectors[word].keys()
+                   if feature.split(':')[0].endswith(self.model_name) and
+                   len(feature.split(':')[0].split('»')) <= self.max_depth
+                  ]
+
+        return co_occ
+
+    @jit(parallel=True)
+    def __prepare_training_set_pp(self, vectors):
         # 15/02/2019: we will train just over existing ctxw_psths,
         # rest will have random embeddings
         print('preparing training set...')
@@ -237,32 +275,25 @@ class Glove_Model():
             if layer.name == 'context_embeddings':
                 layer.set_weights([weight])
 
-    def model_evaluation(self, context_embeddings=None, metric='spermanr'):
+    def model_evaluation(self, set_context_embeddings=None, metric='spermanr'):
 
         print('running %s model evaluation:' %self.model_name)
         # from sklearn.metrics.pairwise import euclidean_distances
 
-        b_cntx = None
-        b_cntr = None
-        e_cntx = None
-        e_cntr = None
+        # new keras model will ad number to layer name
+        if self.paths.index(self.model_name) != 0:
+            index_end = '_'+str(self.paths.index(self.model_name)) # new keras model will ad number to layer name
+        else:
+            index_end = ''
 
-        print('extracting embeddigns and wheights...')
-        for layer in self.model.layers:
-            if layer.name == self.CENTRAL_BIASES:
-                b_cntr = layer.get_weights()[0]
+        self.layer_index = {self.model.weights[index].name.split('/')[0]: index
+                            for index, layer in enumerate(self.model.weights)}
 
-            if layer.name == self.CENTRAL_EMBEDDINGS:
-                e_cntr = layer.get_weights()[0]
-
-            if layer.name == self.CONTEXT_BIASES:
-                b_cntx = layer.get_weights()[0]
-
-            if context_embeddings is None:
-                if layer.name == self.CONTEXT_EMBEDDINGS:
-                    e_cntx = layer.get_weights()[0]
-            else:
-                e_cntx = context_embeddings
+        if set_context_embeddings is None:
+            context_embeddings = [layer.get_weights()[0] for layer in self.model.layers
+                                  if layer.name == self.CONTEXT_EMBEDDINGS]
+        else:
+            context_embeddings = [set_context_embeddings]
 
         if metric == 'frobenius':
             original_matrix = np.zeros((e_cntr.shape[0], e_cntr.shape[0]))
@@ -278,10 +309,10 @@ class Glove_Model():
 
                 # print(x,y,ppmi)
                 original_matrix[y][x] = ppmi
-                new_matrix[y][x] = glove_reverse(b_cntx[x],
-                                                      b_cntr[y],
-                                                      e_cntx[x],
-                                                      e_cntr[y])
+                new_matrix[y][x] = glove_reverse(self.model.get_weights()[self.layer_index['context_biases'+index_end]][j_s[index]],
+                                                 self.model.get_weights()[layer_index['central_biases'+index_end]][i_s[index]],
+                                                 context_embeddings[0][j_s[index]],
+                                                 self.model.get_weights()[layer_index['central_embeddings'+index_end]][i_s[index]])
             print('computing Frobenius distance...')
             return frobenius_distance(original_matrix, new_matrix)
 
@@ -292,10 +323,10 @@ class Glove_Model():
             new_ppmis = np.zeros(len(ppmis))
             print('collecting new distribution...')
             for index, ppmi in enumerate(ppmis):
-                new_ppmis[index] = glove_reverse(b_cntx[j_s[index]],
-                                                 b_cntr[i_s[index]],
-                                                 e_cntx[j_s[index]],
-                                                 e_cntr[i_s[index]])
+                new_ppmis[index] = glove_reverse(self.model.get_weights()[layer_index['context_biases'+index_end]][j_s[index]],
+                                                 self.model.get_weights()[layer_index['central_biases'+index_end]][i_s[index]],
+                                                 context_embeddings[0][j_s[index]],
+                                                 self.model.get_weights()[layer_index['central_embeddings'+index_end]][i_s[index]])
 
             print('computing Jensen-Shannon divergence...')
             return jsd(ppmis, new_ppmis)
@@ -309,10 +340,10 @@ class Glove_Model():
             new_ppmis = np.zeros(len(ppmis))
             print('collecting new distribution...')
             for index, ppmi in enumerate(ppmis):
-                new_ppmis[index] = glove_reverse(b_cntx[j_s[index]],
-                                                 b_cntr[i_s[index]],
-                                                 e_cntx[j_s[index]],
-                                                 e_cntr[i_s[index]])
+                new_ppmis[index] = glove_reverse(self.model.get_weights()[self.layer_index['context_biases'+index_end]][j_s[index]],
+                                                 self.model.get_weights()[self.layer_index['central_biases'+index_end]][i_s[index]],
+                                                 context_embeddings[0][j_s[index]],
+                                                 self.model.get_weights()[self.layer_index['central_embeddings'+index_end]][i_s[index]])
 
             print('computing SPerman correlation...')
             return spearmanr(ppmis, new_ppmis), new_ppmis
@@ -343,7 +374,7 @@ class Glove_Model():
         self.focal_vocabulary = load_model.focal_vocabulary_id.keys()
         self.__co_occurrences = load_model.co_occ
         self.__i_indices, self.__j_indices, self.__counts = zip(*self.__co_occurrences)
-        self.asimmetric_glove(load_model.model.get_weights()[0].shape[1])
+        self.asimmetric_glove(load_model.weights[0].shape[1])
         self.model.set_weights(load_model.weights)
 
         # self.model.set_weights(load_model.weights)
