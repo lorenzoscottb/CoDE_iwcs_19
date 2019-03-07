@@ -61,7 +61,7 @@ class Glove_Model():
         print('collectiong possible word_paths...')
         pp = set([paths.split(':')[0] for word in vectors.keys()
                   for paths in vectors[word]
-                  if paths.split(':')[0].endswith(path_end) and
+                  if self.model_name in paths.split(':')[0].split('»')[0] and
                   len(paths.split(':')[0].split('»')) <= path_depth])
 
         return list(pp)
@@ -71,7 +71,7 @@ class Glove_Model():
 
         ctx_v = set([paths.split(':')[1] for word in vectors.keys()
                      for paths in vectors[word]
-                     if paths.split(':')[0].endswith(path_end) and
+                     if path_end in paths.split(':')[0].split('»')[0] and
                      len(paths.split(':')[0].split('»')) <= path_depth])
 
         return list(ctx_v)
@@ -84,9 +84,10 @@ class Glove_Model():
         for path in paths:
             word += self.local_context(vectors, path, path_depth)
 
-        print('compleated. Context-vocabulary has len: %s' % len(word))
+        voc = set(word)
+        print('compleated. Context-vocabulary has len: %s' % len(voc))
 
-        return set(word)
+        return voc
 
     @jit(parallel=True)
     def fcl_v(self, vectors):
@@ -95,11 +96,13 @@ class Glove_Model():
         words = [
                 word + self.mrg + path.split(':')[0]
                 for word in vectors.keys() for path in vectors[word].keys()
-                if path.split(':')[0].endswith(self.model_name) and
+                if self.model_name in path.split(':')[0].split('»')[0] and
                 len(path.split(':')[0].split('»')) < (self.max_depth + 1)
                 ]
 
-        return words
+        voc = set(words)
+        print('compleated. Focal-vocabulary has len: %s' % len(voc))
+        return voc
 
     @jit(parallel=True)
     def fcl_v_pp(self, vectors, possible_paths):
@@ -108,8 +111,7 @@ class Glove_Model():
         words = [word + self.mrg + path for path in possible_paths
                 for word in vectors.keys()]
 
-        print('compleated. Focal-vocabulary has len: %s' % len(words))
-
+        print('compleated. possible-paths Focal-vocabulary has len: %s' % len(words))
         return words
 
     @jit(parallel=True)
@@ -123,7 +125,7 @@ class Glove_Model():
                    self.context_vocabulary_id[feature.split(':')[1]],
                    vectors[word][feature])
                    for word in vectors.keys() for feature in vectors[word].keys()
-                   if feature.split(':')[0].endswith(self.model_name) and
+                   if self.model_name in feature.split(':')[0].split('»')[0] and
                    len(feature.split(':')[0].split('»')) <= self.max_depth
                   ]
 
@@ -140,7 +142,7 @@ class Glove_Model():
                    self.context_vocabulary_id[p_c.split(':')[1]],
                    vectors[word][p_c])
                    for word in vectors.keys() for p_c in vectors[word].keys()
-                   if p_c.split(':')[0].endswith(self.model_name) and
+                   if self.model_name in p_c.split(':')[0].split('»')[0] and
                    len(p_c.split(':')[0].split('»')) < 4
                   ]
 
