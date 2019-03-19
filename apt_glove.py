@@ -24,12 +24,20 @@ class Glove_Model():
         self.__co_occurrences = None
         self.mrg = merging_operator
 
-    def fit_to_vectors(self, vectors, use_sample=False, use_possible_paths=False):
+    def fit_to_vectors(self, vectors, use_sample=False, use_possible_paths=False, expand_vocabulary=False):
+        '''''
+        right now the context vocabulary is limited to the original one
+        to remove this limit remove the last and condition from the
+        listchomp.
+        '''
         print('\nfitting the %s GloVe model...' %self.model_name)
         vectors = self.load_apt(vectors)
+        self.original_vocabulary = vectors.keys()
 
         if not self.context_vocabulary:
-            self.context_vocabulary = self.ctx_v(vectors, self.paths, self.max_depth)  # words within single lexems
+            self.context_vocabulary = self.ctx_v(vectors, self.paths,
+                                                 self.max_depth,
+                                                 expand_vocabulary=expand_vocabulary)  # words within single lexems
             self.context_vocabulary_id = {word: i for i, word in enumerate(self.context_vocabulary)}
 
         if use_sample:
@@ -67,22 +75,23 @@ class Glove_Model():
         return list(pp)
 
     @jit(parallel=True)
-    def local_context(self, vectors, path_end, path_depth):
+    def local_context(self, vectors, path_end, path_depth, expand_vocabulary=False):
 
         ctx_v = set([paths.split(':')[1] for word in vectors.keys()
-                     for paths in vectors[word]
-                     if path_end in paths.split(':')[0].split('»')[0] and
-                     len(paths.split(':')[0].split('»')) <= path_depth])
+                         for paths in vectors[word]
+                         if path_end in paths.split(':')[0].split('»')[0] and
+                         len(paths.split(':')[0].split('»')) <= path_depth and
+                         paths.split(':')[1] in self.original_vocabulary])
 
         return list(ctx_v)
 
     @jit(parallel=True)
-    def ctx_v(self, vectors, paths, path_depth):
+    def ctx_v(self, vectors, paths, path_depth, expand_vocabulary=False):
         print('collecting global context vocabulary...')
         word = []
 
         for path in paths:
-            word += self.local_context(vectors, path, path_depth)
+            word += self.local_context(vectors, path, path_depth, expand_vocabulary=expand_vocabulary)
 
         voc = set(word)
         print('compleated. Context-vocabulary has len: %s' % len(voc))
@@ -97,7 +106,8 @@ class Glove_Model():
                 word + self.mrg + path.split(':')[0]
                 for word in vectors.keys() for path in vectors[word].keys()
                 if self.model_name in path.split(':')[0].split('»')[0] and
-                len(path.split(':')[0].split('»')) < (self.max_depth + 1)
+                len(path.split(':')[0].split('»')) < (self.max_depth + 1) and
+                path.split(':')[1] in self.original_vocabulary
                 ]
 
         voc = set(words)
@@ -126,7 +136,8 @@ class Glove_Model():
                    vectors[word][feature])
                    for word in vectors.keys() for feature in vectors[word].keys()
                    if self.model_name in feature.split(':')[0].split('»')[0] and
-                   len(feature.split(':')[0].split('»')) <= self.max_depth
+                   len(feature.split(':')[0].split('»')) <= self.max_depth and
+                    feature.split(':')[1] in vectors.keys()
                   ]
 
         return co_occ
@@ -187,19 +198,19 @@ class Glove_Model():
     def ppmis(self):
         return self.__counts
 
-    def asimmetric_glove(self, dimension):
+    def asimmetric_glove(self, dimension, allow_growth=False):
 
         import tensorflow as tf
-        from keras.backend.tensorflow_backend import set_session
 
         # set limit to Keras' expansion on GPU
-        from keras.backend.tensorflow_backend import set_session
-        import tensorflow as tf
-        config = tf.ConfigProto()
-        config.gpu_options.allow_growth = True  # dynamically grow the memory used on the GPU
-        config.log_device_placement = True  # to log device placement (on which device the operation ran)
-        sess = tf.Session(config=config)
-        set_session(sess)  # set this TensorFlow session as the default session for Keras
+        if allow_growth:
+            from keras.backend.tensorflow_backend import set_session
+            import tensorflow as tf
+            config = tf.ConfigProto()
+            config.gpu_options.allow_growth = True  # dynamically grow the memory used on the GPU
+            config.log_device_placement = True  # to log device placement (on which device the operation ran)
+            sess = tf.Session(config=config)
+            set_session(sess)  # set this TensorFlow session as the default session for Keras
 
         self.CENTRAL_EMBEDDINGS = 'central_embeddings'
         self.CONTEXT_EMBEDDINGS = 'context_embeddings'
@@ -219,6 +230,7 @@ class Glove_Model():
         :return:
         """
 
+        print('setting the GloVe model...')
         input_focal = Input((1,), name='central_word_id')
         input_context = Input((1,), name='context_word_id')
 
@@ -350,7 +362,7 @@ class Glove_Model():
             print('computing SPerman correlation...')
             return spearmanr(ppmis, new_ppmis), new_ppmis
 
-    def save_model(self):
+    def save_model(self, name=''):
 
         new_model = Compressed_model(self.model_name,
                                      self.context_vocabulary_id,
@@ -358,7 +370,7 @@ class Glove_Model():
                                      self.__co_occurrences,
                                      self.model.get_weights())
 
-        save_object(new_model, self.model_name)
+        save_object(new_model, name+self.model_name)
         print('saved a reduced version of %s model...' % self.model_name)
 
     def load_model(self, model_object_dir):
@@ -376,8 +388,10 @@ class Glove_Model():
         self.focal_vocabulary = load_model.focal_vocabulary_id.keys()
         self.__co_occurrences = load_model.co_occ
         self.__i_indices, self.__j_indices, self.__counts = zip(*self.__co_occurrences)
-        self.asimmetric_glove(load_model.weights[0].shape[1])
-        self.model.set_weights(load_model.weights)
+        self.vec_dim = load_model.weights[0].shape[1]
+        self.weights = load_model.weights
+        self.asimmetric_glove(self.vec_dim)
+        self.model.set_weights(self.weights)
 
         # self.model.set_weights(load_model.weights)
 
@@ -475,4 +489,3 @@ class Compressed_model():
         self.focal_vocabulary_id = fcl_v
         self.co_occ = co_occ
         self.weights = weights
-
