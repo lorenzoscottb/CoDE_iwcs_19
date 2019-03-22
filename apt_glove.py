@@ -25,11 +25,14 @@ class Glove_Model():
         self.mrg = merging_operator
 
     def fit_to_vectors(self, vectors, use_sample=False, use_possible_paths=False, expand_vocabulary=False):
+
         '''''
+        IMPORTANT
         right now the context vocabulary is limited to the original one
         to remove this limit remove the last and condition from the
         listchomp.
         '''
+
         print('\nfitting the %s GloVe model...' %self.model_name)
         vectors = self.load_apt(vectors)
         self.original_vocabulary = vectors.keys()
