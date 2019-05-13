@@ -25,14 +25,11 @@ class Glove_Model():
         self.mrg = merging_operator
 
     def fit_to_vectors(self, vectors, use_sample=False, use_possible_paths=False, expand_vocabulary=False):
-
         '''''
-        IMPORTANT
         right now the context vocabulary is limited to the original one
         to remove this limit remove the last and condition from the
         listchomp.
         '''
-
         print('\nfitting the %s GloVe model...' %self.model_name)
         vectors = self.load_apt(vectors)
         self.original_vocabulary = vectors.keys()
@@ -201,12 +198,10 @@ class Glove_Model():
     def ppmis(self):
         return self.__counts
 
-    def asimmetric_glove(self, dimension, allow_growth=False):
-
-        import tensorflow as tf
-
+    def asimmetric_glove(self, dimension, allow_grouth=False):
+        
         # set limit to Keras' expansion on GPU
-        if allow_growth:
+        if allow_grouth:
             from keras.backend.tensorflow_backend import set_session
             import tensorflow as tf
             config = tf.ConfigProto()
@@ -233,7 +228,6 @@ class Glove_Model():
         :return:
         """
 
-        print('setting the GloVe model...')
         input_focal = Input((1,), name='central_word_id')
         input_context = Input((1,), name='context_word_id')
 
@@ -492,3 +486,5 @@ class Compressed_model():
         self.focal_vocabulary_id = fcl_v
         self.co_occ = co_occ
         self.weights = weights
+
+
