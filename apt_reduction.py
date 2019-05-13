@@ -13,7 +13,7 @@ paths = ['amod', 'dobj', 'nsubj']
 ideal_epochs = 100
 epochs = (int(ideal_epochs/len(paths)))*len(paths)
 sub_epochs = len(paths)
-dim = 10
+dim = 300
 
 print('reduce sample? [yes/no]')
 i = str(input())
@@ -22,7 +22,7 @@ if i == 'yes':
 else:
     sample_state = False
 
-print('setting up GloVe models...')
+print('setting up CoDE model...')
 amod_model = Glove_Model(model_name='amod', paths=paths)
 amod_model.fit_to_vectors(sample_vectors, use_sample=sample_state)
 amod_model.asimmetric_glove(dim)
@@ -70,25 +70,4 @@ for model in models:
 utils.write_context_embeddings(models)
 utils.write_focal_embeddings(models, paths)
 
-new_ppmis = []
-ppmis = []
-model_tags = []
-for index, model in enumerate(models):
-    ppmi = model.ppmis
-    model_tag = [model.model_name for element in ppmi]
-    evaluation, new_ppmi = model.model_evaluation(context_embeddings=shared_emb)
-    print('%s model correlation' % models[index].model_name, evaluation)
-    new_ppmis += list(new_ppmi)
-    ppmis += list(ppmi)
-    model_tags += list(model_tag)
-
-data_names = ['real_values', 'model_values', 'model']
-data = [ppmis, new_ppmis, model_tags]
-vr = pd.DataFrame()
-for index, columns in enumerate(data_names):
-    vr[columns] = data[index]
-
-sns.set(style="whitegrid")
-sns.scatterplot(x='real_values', y='model_values', hue='model', palette=['r', 'b', 'g'], data=vr)
-plt.savefig(os.getcwd()+'/as_glove_evaluation_data-aptsample_vd-100')
 
