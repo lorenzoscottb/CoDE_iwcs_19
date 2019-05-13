@@ -9,7 +9,7 @@ relation – here amod, dobj, nsubj and nmod
 The code refers to the 2019 IWCS poster version
 """
 
-from Glove_Reduction import Glove_Model
+from apt_glove import Glove_Model
 import numpy as np
 import os
 import utils
