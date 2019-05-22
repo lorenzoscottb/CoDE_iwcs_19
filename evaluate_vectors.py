@@ -1,7 +1,6 @@
 
 
 import numpy as np
-from txt2space import Space
 from scipy.stats.stats import spearmanr
 import pandas as pd
 
