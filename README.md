@@ -1,5 +1,5 @@
 # CoDE: learing Composable Dependency Embeddings 
-This repo contains the code to the 2019 IWCS version of CoDE model, a [GloVe](https://nlp.stanford.edu/pubs/glove.pdf)-based method, built over a [Keras](https://github.com/erwtokritos/keras-glove) implementation. 
+This repo contains the code to the 2019 IWCS version of CoDE model, a [GloVe](https://nlp.stanford.edu/pubs/glove.pdf)-based method, built over a [Keras](https://github.com/erwtokritos/keras-glove) implementation. Future versions of the model will be hosted elsewhere
 
 ## Abstract 
 
