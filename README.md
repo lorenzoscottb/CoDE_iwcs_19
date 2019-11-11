@@ -15,8 +15,7 @@ investigation of the nature of these representations, as well as their usefulnes
 
 ## Vectors 
 
-CoDE vectors used for experiment in the poster can be downloaded [here](https://drive.google.com/file/d/1IjJjSJYIU_u-qU-
-sa67TrjuErZopdiyJ/view)
+CoDE vectors used for experiment in the poster can be downloaded [here](https://drive.google.com/file/d/1IjJjSJYIU_u-qU-sa67TrjuErZopdiyJ/view)
 
 ## Acknowledgements
 CoDE is a [GloVe](https://nlp.stanford.edu/pubs/glove.pdf)based method, built over a [Keras](https://github.com/erwtokritos/keras-glove) implementation. Future versions of the model will be hosted elsewhere
