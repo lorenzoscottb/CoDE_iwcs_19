@@ -1,5 +1,6 @@
 # CoDE: learing Composable Dependency Embeddings 
-This repo contains the code to the 2019 IWCS version of CoDE model, a [GloVe](https://nlp.stanford.edu/pubs/glove.pdf)-based method, built over a [Keras](https://github.com/erwtokritos/keras-glove) implementation. Future versions of the model will be hosted elsewhere
+This repo contains code and data for the CoDE model, presented as a poster at the Vector Semantics for
+Discourse and Dialogue [workshop](https://www.aclweb.org/anthology/W19-09.pdf) of the 2019 IWCS conference.
 
 ## Abstract 
 
@@ -14,4 +15,8 @@ investigation of the nature of these representations, as well as their usefulnes
 
 ## Vectors 
 
-CoDE vectors used for experiment in the poster can be downloaded [here](https://drive.google.com/file/d/1IjJjSJYIU_u-qU-sa67TrjuErZopdiyJ/view)
+CoDE vectors used for experiment in the poster can be downloaded [here](https://drive.google.com/file/d/1IjJjSJYIU_u-qU-
+sa67TrjuErZopdiyJ/view)
+
+## Acknowledgements
+CoDE is a [GloVe](https://nlp.stanford.edu/pubs/glove.pdf)based method, built over a [Keras](https://github.com/erwtokritos/keras-glove) implementation. Future versions of the model will be hosted elsewhere
