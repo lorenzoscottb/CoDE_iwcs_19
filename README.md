@@ -1,4 +1,4 @@
-# CoDE: learing Composable Dependency Embeddings 
+# CoDE: learning Composable Dependency Embeddings 
 This repo contains code and data for the CoDE model, presented as a poster at the Vector Semantics for
 Discourse and Dialogue [workshop](https://www.aclweb.org/anthology/W19-09.pdf) of the 2019 IWCS conference.
 
